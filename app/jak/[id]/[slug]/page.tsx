@@ -3,6 +3,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { getPublishedJakReportByPublicId } from "@/lib/tahrir/jak-reports";
 import { JakCodeFrame } from "@/components/jak-code-frame";
+import { JakReadingText } from "@/components/jak-reading-text";
 import { jakReportMetadata } from "@/lib/jak-sharing";
 import { jakReportHref, publicJakReportId } from "@/lib/jak-urls";
 
@@ -35,6 +36,7 @@ export default async function JakReportPage({ params }: Props) {
       </nav>
       <h1 className="sr-only">{report.title}</h1>
       <JakCodeFrame id={report.id} title={report.title} />
+      <JakReadingText report={report} />
     </main>
   );
 }

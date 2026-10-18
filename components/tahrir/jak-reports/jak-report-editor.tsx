@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRightIcon, CheckIcon, Code2Icon, ExternalLinkIcon, ImagePlusIcon, SaveIcon, SendIcon, UploadCloudIcon } from "lucide-react";
 
 import type { JakCodeReport } from "@/lib/jak-report-types";
+import { validJakFonts, type JakReportFont } from "@/lib/jak-report-fonts";
 import { jakReportHref } from "@/lib/jak-urls";
 import { JakCodePreview } from "@/components/jak-code-preview";
 import { useDraftRecovery, useDraftTabToken } from "@/components/tahrir/use-draft-recovery";
@@ -22,7 +23,7 @@ import { cn } from "@/lib/utils";
 type Status = JakCodeReport["status"];
 type MediaItem = { url: string; filename: string };
 
-type Snapshot = Pick<JakCodeReport, "title" | "excerpt" | "image" | "html" | "css" | "showOnHomepage">;
+type Snapshot = Pick<JakCodeReport, "title" | "excerpt" | "image" | "html" | "css" | "js" | "fonts" | "readingText" | "showOnHomepage">;
 
 const STATUS_LABELS: Record<Status, string> = {
   draft: "مسودة",
@@ -31,7 +32,7 @@ const STATUS_LABELS: Record<Status, string> = {
   archived: "مؤرشف",
 };
 
-const EMPTY: Snapshot = { title: "", excerpt: "", image: null, html: "", css: "", showOnHomepage: false };
+const EMPTY: Snapshot = { title: "", excerpt: "", image: null, html: "", css: "", js: "", fonts: [], readingText: "", showOnHomepage: false };
 
 function snapshotOf(report: JakCodeReport | null): Snapshot {
   return report
@@ -41,6 +42,9 @@ function snapshotOf(report: JakCodeReport | null): Snapshot {
         image: report.image,
         html: report.html,
         css: report.css,
+        js: report.js ?? "",
+        fonts: report.fonts ?? [],
+        readingText: report.readingText ?? "",
         showOnHomepage: report.showOnHomepage,
       }
     : EMPTY;
@@ -76,6 +80,7 @@ export function JakReportEditor({
   canPublish,
   canArchive,
   canRestore,
+  canDelete,
 }: {
   initial: JakCodeReport | null;
   actorId: string;
@@ -84,6 +89,7 @@ export function JakReportEditor({
   canPublish: boolean;
   canArchive: boolean;
   canRestore: boolean;
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const tabToken = useDraftTabToken();
@@ -93,7 +99,13 @@ export function JakReportEditor({
   const [version, setVersion] = useState(initial?.version ?? 0);
   const [status, setStatus] = useState<Status>(initial?.status ?? "draft");
   const [form, setForm] = useState<Snapshot>(() => snapshotOf(initial));
-  const [busy, setBusy] = useState<"save" | "review" | "publish" | "archive" | "restore" | "upload" | null>(null);
+  const [busy, setBusy] = useState<"save" | "review" | "publish" | "archive" | "restore" | "upload" | "font" | "delete" | null>(null);
+  const [fontFamily, setFontFamily] = useState("");
+  const [fontWeight, setFontWeight] = useState("400");
+  const [fontStyle, setFontStyle] = useState<JakReportFont["style"]>("normal");
+  const [savedTitle, setSavedTitle] = useState(initial?.title ?? "");
+  const [deleteTitle, setDeleteTitle] = useState("");
+  const fontInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -113,9 +125,9 @@ export function JakReportEditor({
     // The recovery hook reads localStorage after hydration. Restoring that value is
     // intentionally a state sync so the user can keep working on the recovered draft.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setForm(recovered);
+    setForm({ ...initialSnapshot, ...recovered });
     setRecoveryNotice(false);
-  }, [recovery.recovery, recoveryNotice]);
+  }, [recovery.recovery, recoveryNotice, initialSnapshot]);
 
   function patch(partial: Partial<Snapshot>) {
     setForm((current) => ({ ...current, ...partial }));
@@ -172,6 +184,7 @@ export function JakReportEditor({
     setVersion(result.report.version);
     setStatus(result.report.status);
     savedReport.current = result.report;
+    setSavedTitle(result.report.title);
     savedSnapshot.current = snapshot;
     setSavedEncoded(JSON.stringify(snapshot));
     recovery.markSaved(snapshot);
@@ -219,6 +232,7 @@ export function JakReportEditor({
     setVersion(result.report.version);
     setStatus(result.report.status);
     savedReport.current = result.report;
+    setSavedTitle(result.report.title);
     savedSnapshot.current = snapshot;
     setSavedEncoded(JSON.stringify(snapshot));
     recovery.markSaved(snapshot);
@@ -250,6 +264,38 @@ export function JakReportEditor({
     setMessage({ kind: "ok", text: "رُفعت الصورة، احفظ المسودة لتثبيتها." });
   }
 
+  async function uploadFont(file: File | undefined) {
+    if (!file || busy) return;
+    const candidate: JakReportFont = { family: fontFamily.trim(), weight: fontWeight.trim(), style: fontStyle,
+      filename: "00000000-0000-4000-8000-000000000000.woff2" };
+    if (!validJakFonts([...form.fonts, candidate])) {
+      setMessage({ kind: "error", text: "أدخل اسم خط ووزنًا صحيحين دون تكرار، وبحد أقصى 8 خطوط." });
+      return;
+    }
+    setBusy("font");
+    const body = new FormData(); body.append("file", file);
+    const response = await fetch("/api/tahrir/jak-reports/fonts", { method: "POST", body, signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    const data = await response?.json().catch(() => null) as { filename?: string; error?: string } | null;
+    setBusy(null);
+    if (!response?.ok || !data?.filename) { setMessage({ kind: "error", text: data?.error ?? "تعذر رفع الخط." }); return; }
+    patch({ fonts: [...form.fonts, { ...candidate, filename: data.filename }] });
+    setMessage({ kind: "ok", text: "رُفع الخط. استخدم اسمه في CSS واحفظ التقرير." });
+    if (fontInput.current) fontInput.current.value = "";
+  }
+
+  async function removeReport() {
+    if (busy || !id || deleteTitle !== savedReport.current?.title) return;
+    setBusy("delete");
+    const response = await fetch("/api/tahrir/jak-reports", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", id, expectedVersion: version, confirmationTitle: deleteTitle }), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    const data = await response?.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    setBusy(null);
+    if (!response?.ok || !data?.ok) { setMessage({ kind: "error", text: data?.error ?? "تعذر تأكيد نتيجة الحذف. حدّث الصفحة للتحقق قبل إعادة المحاولة." }); return; }
+    recovery.clear();
+    router.push("/tahrir/jak-reports");
+    router.refresh();
+  }
+
   const statusBadge = status === "published" ? "success" : status === "review" ? "warning" : status === "archived" ? "outline" : "secondary";
 
   return (
@@ -266,7 +312,7 @@ export function JakReportEditor({
               {initial?.sourceUrl ? <Badge variant="info">مستورد</Badge> : null}
               {dirty ? <span className="text-xs text-amber-700 dark:text-amber-300">تعديلات غير محفوظة</span> : null}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">اكتب HTML وCSS كما هما، ثم راجع المعاينة قبل اعتماد التقرير.</p>
+            <p className="mt-1 text-xs text-muted-foreground">أضف HTML وCSS وJavaScript والخطوط، ثم راجع المعاينة قبل النشر.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -315,6 +361,35 @@ export function JakReportEditor({
             <CardContent className="grid gap-5 p-4">
               <EditorCodeField id="jak-report-html" label="HTML" hint="استخدم HTML كاملًا داخل جسم التقرير. تُحفظ القيمة كما هي." value={form.html} onChange={(html) => patch({ html })} />
               <EditorCodeField id="jak-report-css" label="CSS" hint="اختياري. يحقن في المعاينة مع عزل التقرير." value={form.css} onChange={(css) => patch({ css })} />
+              <EditorCodeField id="jak-report-js" label="JavaScript" hint="اختياري. اكتب الكود دون وسم script؛ يعمل بعد عناصر التقرير داخل المعاينة والتقرير المنشور." value={form.js} onChange={(js) => patch({ js })} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>خطوط التقرير</CardTitle></CardHeader>
+            <CardContent className="grid gap-3">
+              <p className="text-xs text-muted-foreground">ارفع خطًا تملك حق استخدامه على الويب. الصيغ: WOFF2، WOFF، TTF، OTF. الحد 2MB لكل ملف و8 خطوط للتقرير.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-1"><Label htmlFor="jak-font-family">اسم الخط في CSS</Label><Input id="jak-font-family" value={fontFamily} onChange={event => setFontFamily(event.target.value)} placeholder="Report Font" /></div>
+                <div className="grid gap-1"><Label htmlFor="jak-font-weight">وزن الخط</Label><Input id="jak-font-weight" dir="ltr" value={fontWeight} onChange={event => setFontWeight(event.target.value)} placeholder="400 أو 100 900" /></div>
+                <div className="grid gap-1"><Label htmlFor="jak-font-style">النمط</Label><select id="jak-font-style" className="rounded-md border bg-background p-2 text-sm" value={fontStyle} onChange={event => setFontStyle(event.target.value as JakReportFont["style"])}><option value="normal">عادي</option><option value="italic">مائل</option></select></div>
+              </div>
+              <input ref={fontInput} type="file" accept=".woff2,.woff,.ttf,.otf" hidden onChange={event => void uploadFont(event.target.files?.[0])} />
+              <Button variant="outline" onClick={() => fontInput.current?.click()} disabled={Boolean(busy) || form.fonts.length >= 8 || !fontFamily.trim() || status === "archived"} loading={busy === "font"}>رفع ملف الخط</Button>
+              {form.fonts.map((font, index) => <div key={`${font.filename}-${index}`} className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
+                <span>{font.family} · {font.weight} · {font.style === "italic" ? "مائل" : "عادي"}</span>
+                <code dir="ltr">{`font-family: "${font.family}";`}</code>
+                <Button size="xs" variant="ghost" className="ms-auto" disabled={Boolean(busy) || status === "archived"} onClick={() => patch({ fonts: form.fonts.filter((_, i) => i !== index) })}>إزالة من التقرير</Button>
+              </div>)}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>نص التقرير للقراءة والبحث</CardTitle></CardHeader>
+            <CardContent className="grid gap-2">
+              <Label htmlFor="jak-report-reading">النص الكامل المطابق للتقرير</Label>
+              <Textarea id="jak-report-reading" rows={8} value={form.readingText} onChange={event => patch({ readingText: event.target.value })} placeholder="أضف نص التقرير هنا إذا كانت الكلمات داخل الصور أو تظهر بالحركة فقط." />
+              <p className="text-xs text-muted-foreground">يظهر للزائر ضمن «قراءة نص التقرير» ويسهّل وصول محركات البحث إليه. عند تركه فارغًا نستخرج النص الموجود في HTML؛ النص داخل الصور يحتاج إضافته هنا.</p>
             </CardContent>
           </Card>
 
@@ -327,7 +402,7 @@ export function JakReportEditor({
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <JakCodePreview html={form.html} css={form.css} title={form.title || "معاينة جاك"} />
+              <JakCodePreview html={form.html} css={form.css} js={form.js} fonts={form.fonts} title={form.title || "معاينة جاك"} />
             </CardContent>
           </Card>
         </div>
@@ -356,6 +431,15 @@ export function JakReportEditor({
           </Card>
 
           {id ? <Card className="gap-2 p-3"><p className="text-xs text-muted-foreground">روابط</p><Button asChild variant="outline" size="sm"><Link href={`/tahrir/jak-reports/${id}/preview`}><ExternalLinkIcon data-icon="inline-start" /> معاينة خاصة</Link></Button>{status === "published" && savedSlug ? <Button asChild variant="ghost" size="sm"><Link href={jakReportHref({ id, publicNumber, slug: savedSlug })} target="_blank"><ExternalLinkIcon data-icon="inline-start" /> فتح الرابط العام</Link></Button> : null}{initial?.sourceUrl ? <a href={initial.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><ExternalLinkIcon className="size-3" aria-hidden /> فتح مصدر الاستيراد</a> : null}</Card> : null}
+          {canDelete && id && status === "archived" ? <Card className="border-destructive/40">
+            <CardHeader><CardTitle>الحذف النهائي</CardTitle></CardHeader>
+            <CardContent className="grid gap-3">
+              <p className="text-xs text-muted-foreground">سيُحذف التقرير وأكواده نهائيًا، ولا يمكن استعادته من اللوحة. يبقى سجل الحذف، وتبقى ملفات الخطوط والصور المشتركة.</p>
+              <Label htmlFor="jak-delete-title">اكتب عنوان التقرير للتأكيد: {savedTitle}</Label>
+              <Input id="jak-delete-title" value={deleteTitle} onChange={event => setDeleteTitle(event.target.value)} autoComplete="off" />
+              <Button variant="destructive" disabled={Boolean(busy) || deleteTitle !== savedTitle} loading={busy === "delete"} onClick={() => void removeReport()}>حذف التقرير نهائيًا</Button>
+            </CardContent>
+          </Card> : null}
         </aside>
       </div>
     </div>

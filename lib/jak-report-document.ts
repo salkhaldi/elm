@@ -1,4 +1,6 @@
 import { imageVariantUrl } from "./image-source.ts";
+import { jakFontCss, type JakReportFont } from "./jak-report-fonts.ts";
+import { parse } from "parse5";
 
 /** Raw report code is executable only inside an opaque-origin sandbox document.
  * Never inject it into an application page or use srcDoc (it inherits the app CSP).
@@ -25,7 +27,7 @@ export function jakDocumentHeaders() {
       "connect-src 'none'",
       "script-src 'unsafe-inline' https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/",
       "style-src 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src data: https://fonts.gstatic.com https://jakelelm.alelm.net",
+      "font-src 'self' data: https://fonts.gstatic.com https://jakelelm.alelm.net",
       "img-src 'self' data: https://jakelelm.alelm.net https://dash.alelm.net https://alelm.net",
       "media-src 'self' https://jakelelm.alelm.net https://dash.alelm.net https://alelm.net",
     ].join("; "),
@@ -57,19 +59,29 @@ function mobileFifaSource(html: string) {
     });
 }
 
-/** Keep stored source untouched. Combine the separate CSS field only at rendering. */
-export function buildJakDocument({ html, css, title, sourcePostId }: { html: string; css: string; title: string; sourcePostId?: number | null }, options: { mobile?: boolean } = {}): string {
+/** Keep stored source untouched. Combine separate CSS, JS and fonts at rendering. */
+export function buildJakDocument({ html, css, title, sourcePostId, js = "", fonts = [] }: { html: string; css: string; title: string; sourcePostId?: number | null; js?: string; fonts?: JakReportFont[] }, options: { mobile?: boolean } = {}): string {
   const renderedHtml = options.mobile && sourcePostId === 1956 ? mobileFifaSource(html) : html;
   // The original FIFA source includes a placeholder style.css link although its
   // actual stylesheet is stored in the separate field. Do not request our API URL.
   const source = css.trim()
     ? renderedHtml.replace(/<link\b(?=[^>]*\brel\s*=\s*["']stylesheet["'])(?=[^>]*\bhref\s*=\s*["'](?:\.\/)?style\.css["'])[^>]*>/gi, "")
     : renderedHtml;
-  const style = css.trim() ? `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>` : "";
+  const fontCss = jakFontCss(fonts);
+  const style = (fontCss || css.trim()) ? `<style>${fontCss}\n${css.replace(/<\/style/gi, "<\\/style")}</style>` : "";
+  const script = js.trim() ? `<script>${js.replace(/<\/script/gi, "<\\/script")}</script>` : "";
   const fallback = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeText(title)}</title>`;
   // Appended CSS respects a standalone document's own fonts, styles and scripts.
   if (/<head\b[^>]*>/i.test(source)) {
-    return source.replace(/<head\b[^>]*>/i, (head) => `${head}${fallback}${style}`);
+    const document = source.replace(/<head\b[^>]*>/i, (head) => `${head}${fallback}${style}`);
+    if (!script) return document;
+    // A literal </body> in an existing script/comment is not the closing tag.
+    const tree = parse(document, { sourceCodeLocationInfo: true });
+    const root = tree.childNodes.find(node => node.nodeName === "html");
+    const body = root && "childNodes" in root ? root.childNodes.find(node => node.nodeName === "body") : undefined;
+    const location = body && "tagName" in body ? body.sourceCodeLocation : undefined;
+    const offset = location?.endTag?.startOffset ?? document.length;
+    return document.slice(0, offset) + script + document.slice(offset);
   }
-  return `<!doctype html><html lang="ar" dir="rtl"><head>${fallback}${style}</head><body>${source}</body></html>`;
+  return `<!doctype html><html lang="ar" dir="rtl"><head>${fallback}${style}</head><body>${source}${script}</body></html>`;
 }

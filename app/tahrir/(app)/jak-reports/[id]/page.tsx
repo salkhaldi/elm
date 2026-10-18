@@ -27,9 +27,10 @@ export default async function JakReportEditPage({ params }: { params: Promise<{ 
         actorId={gate.actor.userId}
         recentMedia={mediaRows.map((row) => ({ url: row.url, filename: row.filename }))}
         canSubmit={gate.actor.can("story.submit")}
-        canPublish={gate.actor.can("story.publish")}
-        canArchive={gate.actor.can("story.archive")}
-        canRestore={gate.actor.can("story.restore")}
+        canPublish={gate.actor.can("jak.publish")}
+        canArchive={gate.actor.can("jak.archive")}
+        canRestore={gate.actor.can("jak.restore")}
+        canDelete={gate.actor.can("jak.delete")}
       />
     </main>
   );

@@ -1,4 +1,6 @@
-/** العقد المشترك لتقرير جاك HTML/CSS المستقل. */
+import type { JakReportFont } from "./jak-report-fonts.ts";
+
+/** العقد المشترك لتقرير جاك HTML/CSS/JavaScript المستقل. */
 export type JakCodeReportStatus = "draft" | "review" | "published" | "archived";
 
 export interface JakCodeReport {
@@ -11,6 +13,9 @@ export interface JakCodeReport {
   image: string | null;
   html: string;
   css: string;
+  js: string;
+  fonts: JakReportFont[];
+  readingText: string;
   /** الظهور في فهرس جاك، وليس الصفحة الرئيسية الإخبارية العامة. */
   showOnHomepage: boolean;
   status: JakCodeReportStatus;
@@ -33,5 +38,8 @@ export interface JakCodeReportInput {
   image: string | null;
   html: string;
   css: string;
+  js?: string;
+  fonts?: JakReportFont[];
+  readingText?: string;
   showOnHomepage: boolean;
 }

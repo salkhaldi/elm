@@ -57,7 +57,7 @@ try {
   await write('app/[section]/page.jsx', `export default async function Page({params}) {
     return <main>section:{(await params).section}</main> }`);
   // Exercise Jak's real numeric and historical UUID routes alongside generic story routes.
-  for (const file of ['app/jak/[id]/route.ts', 'app/jak/[id]/[slug]/page.tsx', 'lib/jak-urls.ts', 'lib/jak-report-types.ts']) {
+  for (const file of ['app/jak/[id]/route.ts', 'app/jak/[id]/[slug]/page.tsx', 'lib/jak-urls.ts', 'lib/jak-report-types.ts', 'lib/jak-report-fonts.ts']) {
     await write(file, await readFile(file, 'utf8'));
   }
   await write('lib/tahrir/jak-reports.ts', `export async function getPublishedJakReportByPublicId(id: string) {
@@ -66,6 +66,7 @@ try {
   }`);
   await write('lib/jak-sharing.ts', `import {jakReportHref} from './jak-urls';
     export function jakReportMetadata(report: any) {return {alternates:{canonical:jakReportHref(report)}}}`);
+  await write('components/jak-reading-text.tsx', 'export const JakReadingText=(_props: {report: unknown})=>null');
   await write('components/jak-code-frame.tsx', 'export function JakCodeFrame({id}: {id:string;title:string}) {return <iframe title="report" src={"/api/jak-reports/"+id+"/document"}/>}');
   await write('app/layout.jsx', 'export default function Layout({children}) { return <html><body>{children}</body></html> }');
   await write('app/page.jsx', 'export default function Page() {return <main>ready</main>}');

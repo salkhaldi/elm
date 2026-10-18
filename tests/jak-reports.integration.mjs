@@ -15,9 +15,9 @@ let client;
 
 const permissions = (...keys) => new Set(["jak.manage", ...keys]);
 const actor = (userId, ...keys) => ({ userId, username: userId, displayName: userId, mustChangePassword: false, can: key => permissions(...keys).has(key) });
-const owner = actor("owner", "story.create", "story.edit.own", "story.submit", "story.archive");
+const owner = actor("owner", "story.create", "story.edit.own", "story.submit", "jak.archive");
 const other = actor("other", "story.create", "story.edit.own", "story.submit");
-const publisher = actor("publisher", "story.publish", "story.archive", "story.restore");
+const publisher = actor("publisher", "jak.publish", "jak.archive", "jak.restore");
 const id = "11111111-1111-4111-8111-111111111111";
 const input = (overrides = {}) => ({ id, expectedVersion: 0, title: "تقرير اختبار", excerpt: "موجز", image: null, html: "<main>خام</main>", css: ".x{color:red}", showOnHomepage: true, ...overrides });
 
@@ -39,9 +39,16 @@ try {
   await client.query(`insert into jak_code_reports (id,slug,title,status,html,css,created_at,updated_at,source_post_id)
     values ($1,'قديم','تقرير قديم','published','<main>أصل</main>','main{color:red}','2020-01-01','2020-01-01',123)`, [legacyId]);
   const original = (await client.query('select * from jak_code_reports where id=$1', [legacyId])).rows[0];
+  await client.query("insert into role_permissions(role_id,permission_key) values ('jak_team','story.publish'),('jak_team','story.archive'),('jak_team','story.restore')");
+  await client.query("insert into user_permissions(user_id,permission_key,effect) values ('denied','story.publish','deny'),('allowed','story.archive','allow')");
   await migrate(databaseClient, { migrationsFolder: "drizzle" });
+  const migratedPermissions = (await client.query("select permission_key from role_permissions where role_id='jak_team' order by permission_key")).rows.map(row => row.permission_key);
+  assert.ok(migratedPermissions.includes('jak.publish') && migratedPermissions.includes('jak.archive') && migratedPermissions.includes('jak.restore'));
+  assert.ok(!migratedPermissions.includes('jak.delete'), 'migration must not grant permanent deletion');
+  assert.equal((await client.query("select effect from user_permissions where user_id='denied' and permission_key='jak.publish'")).rows[0].effect, 'deny');
   const migrated = (await client.query('select * from jak_code_reports where id=$1', [legacyId])).rows[0];
-  const {public_number: legacyNumber, ...preserved} = migrated;
+  const {public_number: legacyNumber, js: migratedJs, fonts: migratedFonts, reading_text: migratedText, ...preserved} = migrated;
+  assert.equal(migratedJs, ''); assert.deepEqual(migratedFonts, []); assert.equal(migratedText, '');
   assert.ok(Number.isSafeInteger(legacyNumber) && legacyNumber > 0);
   assert.deepEqual(preserved, original, 'migration preserves every existing content and identity field');
   await migrate(databaseClient, { migrationsFolder: "drizzle" });
@@ -128,6 +135,36 @@ try {
 
   const [statusAudits] = (await client.query("select count(*)::int as n from audit_log where story_id=$1 and action like 'jak:report-%'", [id])).rows;
   assert.equal(statusAudits.n, 7, "create, saves and successful transitions are audited; rejected transitions are not");
+
+  // Independent JS/fonts/text survive saves, retries and older open editors.
+  const font = { family: 'Report Font', filename: '11111111-1111-4111-8111-111111111111.woff2', weight: '400', style: 'normal' };
+  const enriched = await subject.saveJakReport(input({ expectedVersion: restored.version, js: 'document.body.dataset.ready="yes"', fonts: [font], readingText: 'نص التقرير الكامل' }), owner);
+  const oldEditor = await subject.saveJakReport(input({ expectedVersion: enriched.version, title: 'حفظ من محرر قديم' }), owner);
+  assert.equal(oldEditor.js, enriched.js); assert.deepEqual(oldEditor.fonts, [font]); assert.equal(oldEditor.readingText, enriched.readingText);
+  for (const change of [{js: 42}, {js: 'a'.repeat(1024 * 1024 + 1)}, {fonts: [{ ...font, family: '</style>' }]}]) {
+    await assert.rejects(subject.saveJakReport(input({ expectedVersion: oldEditor.version, ...change }), owner), error => [400, 413].includes(error.status));
+  }
+  const noJak = { ...owner, can: key => key !== 'jak.manage' };
+  await assert.rejects(subject.saveJakReport(input({ expectedVersion: oldEditor.version }), noJak), error => error.status === 403);
+  const genericPublisher = actor('generic', 'story.publish');
+  await assert.rejects(subject.transitionJakReport(id, 'published', oldEditor.version, genericPublisher), error => error.status === 403, 'general publishing alone must not publish Jak');
+  const direct = await subject.transitionJakReport(id, 'published', oldEditor.version, publisher);
+  assert.equal(direct.status, 'published', 'Jak role may publish directly from a draft');
+  await assert.rejects(subject.saveJakReport(input({ expectedVersion: direct.version }), owner), error => error.status === 403, 'non-publisher cannot modify live code');
+
+  const deleter = actor('deleter', 'story.edit.any', 'jak.delete');
+  await assert.rejects(subject.deleteJakReport(id, direct.version, direct.title, deleter), error => error.status === 409, 'archive first');
+  const deletable = await subject.transitionJakReport(id, 'archived', direct.version, publisher);
+  await assert.rejects(subject.deleteJakReport(id, deletable.version, deletable.title, publisher), error => error.status === 403);
+  await assert.rejects(subject.deleteJakReport(id, deletable.version, deletable.title, actor('other', 'story.edit.own', 'jak.delete')), error => error.status === 403);
+  await assert.rejects(subject.deleteJakReport(id, deletable.version - 1, deletable.title, deleter), error => error.status === 409);
+  await assert.rejects(subject.deleteJakReport(id, deletable.version, 'wrong', deleter), error => error.status === 400);
+  assert.deepEqual(await subject.deleteJakReport(id, deletable.version, deletable.title, deleter), { id });
+  assert.equal(await subject.getJakReport(id), null);
+  assert.equal(await subject.getPublishedJakReportByPublicId(String(deletable.publicNumber)), null);
+  assert.equal((await client.query("select count(*)::int n from audit_log where story_id=$1 and action='jak:report-delete'", [id])).rows[0].n, 1);
+  await assert.rejects(subject.deleteJakReport(id, deletable.version, deletable.title, deleter), error => error.status === 404);
+  assert.ok(await subject.getJakReport(second.id), 'deletion leaves other reports intact');
   console.log("Jak reports integration passed: ownership filtering, stable create retry, CAS loser, status permissions, restore gate and audit atomicity.");
 } finally {
   await client?.end();
