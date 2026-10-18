@@ -36,10 +36,10 @@ test("سياسات الحفظ والانتقال والتدقيق ودفعة ا�
   assert.match(service, /with updated as/);
   assert.match(service, /where "id" = \$\{input\.id\} and "version" = \$\{existing\.version\}/);
   assert.match(service, /returning \*/);
-  assert.match(service, /story\.publish/);
+  assert.match(service, /jak\.publish/);
   assert.match(service, /story\.submit/);
-  assert.match(service, /story\.archive/);
-  assert.match(service, /story\.restore/);
+  assert.match(service, /jak\.archive/);
+  assert.match(service, /jak\.restore/);
   assert.match(service, /audit_log/);
   assert.match(importer, /--apply/);
   assert.match(importer, /on conflict do nothing/);

@@ -5,6 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { check, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
+import type { JakReportFont } from "../lib/jak-report-fonts";
 
 export const series = pgTable("series", {
   slug: text("slug").primaryKey(),
@@ -514,6 +515,9 @@ export const jakCodeReports = pgTable("jak_code_reports", {
   image: text("image"),
   html: text("html").notNull().default(""),
   css: text("css").notNull().default(""),
+  js: text("js").notNull().default(""),
+  fonts: jsonb("fonts").$type<JakReportFont[]>().notNull().default([]),
+  readingText: text("reading_text").notNull().default(""),
   /** يظهر في فهرس جاك فقط، وليس في الصفحة الرئيسية الإخبارية. */
   showOnHomepage: integer("show_on_homepage").notNull().default(0),
   status: text("status").notNull().default("draft"),

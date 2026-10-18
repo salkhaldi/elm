@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/tahrir/access";
 import {
   getJakReport,
+  deleteJakReport,
   JakReportError,
   listJakReports,
   saveJakReport,
@@ -10,6 +11,7 @@ import {
   validateJakReportInput,
 } from "@/lib/tahrir/jak-reports";
 import type { JakCodeReportStatus } from "@/lib/jak-report-types";
+import { isJakSameOrigin, readJakBody } from "@/lib/tahrir/jak-request";
 
 export const dynamic = "force-dynamic";
 
@@ -44,16 +46,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const gate = await requirePermission("jak.manage");
   if (!gate.ok) return gate.response;
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? new URL(request.url).host;
-  let originHost = "";
-  try { originHost = origin ? new URL(origin).host : ""; } catch { /* Reject malformed origins. */ }
-  if (!originHost || originHost !== host || request.headers.get("sec-fetch-site") === "cross-site") {
+  if (!isJakSameOrigin(request)) {
     return NextResponse.json({ error: "مصدر الطلب غير مسموح." }, { status: 403 });
   }
-  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  let body: Record<string, unknown> | null;
+  try { body = JSON.parse(new TextDecoder().decode(await readJakBody(request, 8 * 1024 * 1024))); }
+  catch { return NextResponse.json({ error: "الطلب غير صالح أو تجاوز الحجم المسموح." }, { status: 400 }); }
   if (!body || typeof body.action !== "string") return NextResponse.json({ error: "الإجراء مطلوب." }, { status: 400 });
   try {
+    if (body.action === "delete") {
+      if (typeof body.id !== "string" || typeof body.confirmationTitle !== "string" || !Number.isInteger(body.expectedVersion)) {
+        return NextResponse.json({ error: "معرّف التقرير ونسخته وعنوان التأكيد مطلوبة." }, { status: 400 });
+      }
+      const deleted = await deleteJakReport(body.id, body.expectedVersion as number, body.confirmationTitle, gate.actor);
+      return NextResponse.json({ ok: true, deleted }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (body.action === "save") {
       const report = await saveJakReport(validateJakReportInput(body), gate.actor);
       return NextResponse.json({ ok: true, report });

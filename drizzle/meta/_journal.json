@@ -169,6 +169,13 @@
       "when": 1789900000000,
       "tag": "0023_jak_public_number",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792278000000,
+      "tag": "0024_jak_report_controls",
+      "breakpoints": true
     }
   ]
 }

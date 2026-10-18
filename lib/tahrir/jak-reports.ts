@@ -4,6 +4,7 @@ import { jakCodeReports } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import type { JakCodeReport, JakCodeReportInput, JakCodeReportStatus } from "@/lib/jak-report-types";
 import type { WriteActor } from "./write-policy";
+import { validJakFonts } from "../jak-report-fonts";
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_CSS_BYTES = 1024 * 1024;
@@ -33,6 +34,9 @@ function toReport(row: JakReportRow): JakCodeReport {
     image: row.image,
     html: row.html,
     css: row.css,
+    js: row.js,
+    fonts: row.fonts,
+    readingText: row.readingText,
     showOnHomepage: row.showOnHomepage === 1,
     status: row.status as JakCodeReportStatus,
     authorId: row.authorId,
@@ -81,6 +85,9 @@ function validateInput(input: JakCodeReportInput) {
   if (input.title.length > 500 || input.excerpt.length > 2_000) throw new JakReportError("العنوان أو الموجز يتجاوز الحد المسموح.", 413);
   if (bytes(input.html) > MAX_HTML_BYTES) throw new JakReportError("HTML يتجاوز حد 2MB.", 413);
   if (bytes(input.css) > MAX_CSS_BYTES) throw new JakReportError("CSS يتجاوز حد 1MB.", 413);
+  if (input.js !== undefined && (typeof input.js !== "string" || bytes(input.js) > 1024 * 1024)) throw new JakReportError("JavaScript غير صالح أو يتجاوز 1MB.", 413);
+  if (input.readingText !== undefined && (typeof input.readingText !== "string" || bytes(input.readingText) > 1024 * 1024)) throw new JakReportError("نص القراءة غير صالح أو يتجاوز 1MB.", 413);
+  if (input.fonts !== undefined && !validJakFonts(input.fonts)) throw new JakReportError("بيانات الخطوط غير صالحة؛ الحد الأقصى 8 خطوط.", 400);
   if (typeof input.showOnHomepage !== "boolean") throw new JakReportError("قيمة إظهار التقرير غير صالحة.", 400);
   if (input.expectedVersion !== undefined && (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0)) {
     throw new JakReportError("نسخة التقرير غير صالحة.", 400);
@@ -105,7 +112,7 @@ function assertOwnOrAny(actor: WriteActor, report: JakReportRow | null) {
 
 function reportProjection(alias = "mutated") {
   const table = sql.raw(alias);
-  return sql`${table}."id" as "id", ${table}."public_number" as "publicNumber", ${table}."slug" as "slug", ${table}."title" as "title", ${table}."excerpt" as "excerpt", ${table}."image" as "image", ${table}."html" as "html", ${table}."css" as "css", ${table}."show_on_homepage" as "showOnHomepage", ${table}."status" as "status", ${table}."author_id" as "authorId", ${table}."version" as "version", ${table}."created_at" as "createdAt", ${table}."updated_at" as "updatedAt", ${table}."published_at" as "publishedAt", ${table}."source_url" as "sourceUrl", ${table}."source_post_id" as "sourcePostId", ${table}."source_published_at" as "sourcePublishedAt", ${table}."source_modified_at" as "sourceModifiedAt"`;
+  return sql`${table}."id" as "id", ${table}."public_number" as "publicNumber", ${table}."slug" as "slug", ${table}."title" as "title", ${table}."excerpt" as "excerpt", ${table}."image" as "image", ${table}."html" as "html", ${table}."css" as "css", ${table}."js" as "js", ${table}."fonts" as "fonts", ${table}."reading_text" as "readingText", ${table}."show_on_homepage" as "showOnHomepage", ${table}."status" as "status", ${table}."author_id" as "authorId", ${table}."version" as "version", ${table}."created_at" as "createdAt", ${table}."updated_at" as "updatedAt", ${table}."published_at" as "publishedAt", ${table}."source_url" as "sourceUrl", ${table}."source_post_id" as "sourcePostId", ${table}."source_published_at" as "sourcePublishedAt", ${table}."source_modified_at" as "sourceModifiedAt"`;
 }
 
 async function mutationResult(db: ReturnType<typeof getDb>, query: ReturnType<typeof sql>): Promise<JakCodeReport> {
@@ -197,6 +204,10 @@ export async function saveJakReport(input: JakCodeReportInput, actor: WriteActor
   assertManage(actor);
   const db = requireDb();
   const [existing] = await db.select().from(jakCodeReports).where(eq(jakCodeReports.id, input.id)).limit(1);
+  // Older open editors must not erase fields they do not yet send.
+  const js = input.js ?? existing?.js ?? "";
+  const fonts = input.fonts ?? existing?.fonts ?? [];
+  const readingText = input.readingText ?? existing?.readingText ?? "";
   // إعادة إرسال إنشاء مسودة بمعرّف ثابت تعيد الصف نفسه إذا كان المحتوى مطابقًا؛
   // أي اختلاف يبقى تعارضًا ولا يستبدل مادة يملكها محرر آخر.
   if (existing && input.expectedVersion === 0) {
@@ -206,6 +217,9 @@ export async function saveJakReport(input: JakCodeReportInput, actor: WriteActor
       && existing.image === input.image
       && existing.html === input.html
       && existing.css === input.css
+      && existing.js === js
+      && JSON.stringify(existing.fonts) === JSON.stringify(fonts)
+      && existing.readingText === readingText
       && existing.showOnHomepage === (input.showOnHomepage ? 1 : 0);
     if (same) {
       assertOwnOrAny(actor, existing);
@@ -216,7 +230,7 @@ export async function saveJakReport(input: JakCodeReportInput, actor: WriteActor
   assertOwnOrAny(actor, existing ?? null);
   if (existing && input.expectedVersion === undefined) throw new JakReportError("نسخة التقرير مطلوبة للحفظ.", 409);
   if (existing && existing.status === "archived") throw new JakReportError("استعد التقرير المؤرشف عبر انتقال معتمد قبل تحريره.", 409);
-  if (existing?.status === "published" && !actor.can("story.publish")) {
+  if (existing?.status === "published" && !actor.can("jak.publish")) {
     throw new JakReportError("تعديل التقرير المنشور يتطلب صلاحية النشر؛ أعده لمسودة أولًا عبر انتقال معتمد.", 403);
   }
   if (existing && input.expectedVersion !== existing.version) throw new JakReportError("تغيّرت المادة منذ فتحها. أعد تحميلها قبل الحفظ.", 409);
@@ -229,14 +243,17 @@ export async function saveJakReport(input: JakCodeReportInput, actor: WriteActor
     image: input.image,
     html: input.html,
     css: input.css,
+    js,
+    fonts,
+    readingText,
     showOnHomepage: input.showOnHomepage ? 1 : 0,
     updatedAt: now,
   };
   if (!existing) {
     const context = JSON.stringify({ reportId: input.id, version: 1, action: "jak:report-create" });
     return mutationResult(db, sql`with inserted as (
-      insert into "jak_code_reports" ("id", "slug", "title", "excerpt", "image", "html", "css", "show_on_homepage", "status", "author_id", "version", "created_at", "updated_at", "published_at", "source_url", "source_post_id", "source_published_at", "source_modified_at")
-      values (${input.id}, ${values.slug}, ${values.title}, ${values.excerpt}, ${values.image}, ${values.html}, ${values.css}, ${values.showOnHomepage}, 'draft', ${actor.userId}, 1, ${now}, ${now}, null, null, null, null, null)
+      insert into "jak_code_reports" ("id", "slug", "title", "excerpt", "image", "html", "css", "js", "fonts", "reading_text", "show_on_homepage", "status", "author_id", "version", "created_at", "updated_at", "published_at", "source_url", "source_post_id", "source_published_at", "source_modified_at")
+      values (${input.id}, ${values.slug}, ${values.title}, ${values.excerpt}, ${values.image}, ${values.html}, ${values.css}, ${values.js}, ${JSON.stringify(values.fonts)}::jsonb, ${values.readingText}, ${values.showOnHomepage}, 'draft', ${actor.userId}, 1, ${now}, ${now}, null, null, null, null, null)
       returning *
     ), logged as (
       insert into "audit_log" ("id", "at", "actor", "action", "story_id", "detail", "context")
@@ -250,7 +267,7 @@ export async function saveJakReport(input: JakCodeReportInput, actor: WriteActor
   const context = JSON.stringify({ reportId: input.id, version: nextVersion, action: "jak:report-save" });
   return mutationResult(db, sql`with updated as (
     update "jak_code_reports"
-    set "slug" = ${values.slug}, "title" = ${values.title}, "excerpt" = ${values.excerpt}, "image" = ${values.image}, "html" = ${values.html}, "css" = ${values.css}, "show_on_homepage" = ${values.showOnHomepage}, "updated_at" = ${now}, "version" = ${nextVersion}
+    set "slug" = ${values.slug}, "title" = ${values.title}, "excerpt" = ${values.excerpt}, "image" = ${values.image}, "html" = ${values.html}, "css" = ${values.css}, "js" = ${values.js}, "fonts" = ${JSON.stringify(values.fonts)}::jsonb, "reading_text" = ${values.readingText}, "show_on_homepage" = ${values.showOnHomepage}, "updated_at" = ${now}, "version" = ${nextVersion}
     where "id" = ${input.id} and "version" = ${existing.version}
     returning *
   ), logged as (
@@ -275,8 +292,8 @@ export async function transitionJakReport(
   if (!existing) throw new JakReportError("التقرير غير موجود.", 404);
   if (existing.version !== expectedVersion) throw new JakReportError("تغيّرت المادة منذ فتحها. أعد تحميلها قبل الانتقال.", 409);
   if (existing.status === status) {
-    if (status === "published" && !actor.can("story.publish")) throw new JakReportError("النشر من صلاحية المعتمدين فقط.", 403);
-    if (status === "archived" && !actor.can("story.archive")) throw new JakReportError("أرشفة التقرير من صلاحية المعتمدين.", 403);
+    if (status === "published" && !actor.can("jak.publish")) throw new JakReportError("النشر من صلاحية المعتمدين فقط.", 403);
+    if (status === "archived" && !actor.can("jak.archive")) throw new JakReportError("أرشفة التقرير من صلاحية المعتمدين.", 403);
     if (status === "review" && !actor.can("story.submit")) throw new JakReportError("رفع التقرير للمراجعة من صلاحية المحررين.", 403);
     if (status === "draft") assertOwnOrAny(actor, existing);
     if (status === "review") assertOwnOrAny(actor, existing);
@@ -291,12 +308,12 @@ export async function transitionJakReport(
   const isSubmit = status === "review";
   const isArchive = status === "archived";
   const isReturnToDraft = status === "draft" && existing.status === "published";
-  if (isPublish && !actor.can("story.publish")) throw new JakReportError("النشر من صلاحية المعتمدين فقط.", 403);
+  if (isPublish && !actor.can("jak.publish")) throw new JakReportError("النشر من صلاحية المعتمدين فقط.", 403);
   if (isSubmit && !actor.can("story.submit")) throw new JakReportError("رفع التقرير للمراجعة من صلاحية المحررين.", 403);
-  if (isArchive && !actor.can("story.archive")) throw new JakReportError("أرشفة التقرير من صلاحية المعتمدين.", 403);
-  if (isReturnToDraft && !actor.can("story.publish")) throw new JakReportError("إعادة المنشور لمسودة تتطلب صلاحية النشر.", 403);
+  if (isArchive && !actor.can("jak.archive")) throw new JakReportError("أرشفة التقرير من صلاحية المعتمدين.", 403);
+  if (isReturnToDraft && !actor.can("jak.publish")) throw new JakReportError("إعادة المنشور لمسودة تتطلب صلاحية النشر.", 403);
   if (isSubmit || (status === "draft" && existing.status === "review")) assertOwnOrAny(actor, existing);
-  if (status === "draft" && existing.status === "archived" && !actor.can("story.restore")) {
+  if (status === "draft" && existing.status === "archived" && !actor.can("jak.restore")) {
     throw new JakReportError("استعادة التقرير المؤرشف تتطلب صلاحية الاستعادة.", 403);
   }
   if (status === "review" && existing.status === "published") {
@@ -324,6 +341,32 @@ export async function transitionJakReport(
   select ${reportProjection("updated")} from updated cross join logged`);
 }
 
+/** Delete the row and write its audit event in the same statement. Stored shared
+ * fonts/media are retained: removing one report must not break another report.
+ */
+export async function deleteJakReport(id: string, expectedVersion: number, confirmationTitle: string, actor: WriteActor) {
+  assertManage(actor);
+  if (!actor.can("jak.delete")) throw new JakReportError("لا تملك صلاحية الحذف النهائي لتقارير جاك.", 403);
+  if (!UUID_RE.test(id) || !Number.isInteger(expectedVersion) || expectedVersion < 1) throw new JakReportError("معرّف التقرير ونسخته مطلوبان.", 400);
+  const db = requireDb();
+  const [existing] = await db.select().from(jakCodeReports).where(eq(jakCodeReports.id, id)).limit(1);
+  if (!existing) throw new JakReportError("التقرير غير موجود.", 404);
+  assertOwnOrAny(actor, existing);
+  if (existing.status !== "archived") throw new JakReportError("أرشف التقرير أولًا قبل الحذف النهائي.", 409);
+  if (existing.version !== expectedVersion) throw new JakReportError("تغيّر التقرير. أعد تحميله قبل الحذف.", 409);
+  if (confirmationTitle !== existing.title) throw new JakReportError("اكتب عنوان التقرير مطابقًا لتأكيد الحذف النهائي.", 400);
+  const now = new Date().toISOString();
+  const context = JSON.stringify({ reportId: id, publicNumber: existing.publicNumber, version: expectedVersion });
+  const result = await db.execute(sql`with deleted as (
+    delete from "jak_code_reports" where "id" = ${id} and "version" = ${expectedVersion} and "status" = 'archived' returning "id"
+  ), logged as (
+    insert into "audit_log" ("id", "at", "actor", "action", "story_id", "detail", "context")
+    select ${crypto.randomUUID()}, ${now}, ${actor.username}, 'jak:report-delete', "id", ${`حذف تقرير جاك نهائيًا: ${existing.title}`}, ${context}::jsonb from deleted returning "id"
+  ) select deleted."id" from deleted cross join logged`) as { rows?: { id: string }[] };
+  if (!result.rows?.length) throw new JakReportError("تغيّر التقرير أثناء الحذف. أعد تحميله.", 409);
+  return { id };
+}
+
 export function validateJakReportInput(value: unknown): JakCodeReportInput {
   const input = value as Partial<JakCodeReportInput> | null;
   if (!input || typeof input !== "object") throw new JakReportError("مدخل التقرير غير صالح.", 400);
@@ -335,6 +378,9 @@ export function validateJakReportInput(value: unknown): JakCodeReportInput {
     image: input.image as string | null,
     html: input.html as string,
     css: input.css as string,
+    js: input.js,
+    fonts: input.fonts,
+    readingText: input.readingText,
     showOnHomepage: input.showOnHomepage as boolean,
   };
 }

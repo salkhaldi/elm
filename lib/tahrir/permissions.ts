@@ -40,6 +40,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     label: "المحتوى",
     permissions: [
       { key: "jak.manage", label: "جاك العلم", description: "إضافة تقارير جاك العلم وتحرير أكوادها ومعاينتها." },
+      { key: "jak.publish", label: "نشر تقارير جاك", description: "نشر تقارير جاك مباشرة وتحديث المنشور دون منح نشر الأخبار الأخرى." },
+      { key: "jak.archive", label: "أرشفة تقارير جاك", description: "إخفاء تقارير جاك المنشورة." },
+      { key: "jak.restore", label: "استعادة تقارير جاك", description: "إعادة تقرير مؤرشف إلى مسودة." },
+      { key: "jak.delete", label: "حذف تقارير جاك نهائيًا", description: "حذف تقرير مؤرشف نهائيًا بعد تأكيد عنوانه؛ يبقى سجل العملية." },
       { key: "series.propose", label: "اقتراح سلسلة", description: "رفع مقترح سلسلة جديدة." },
       { key: "series.decide", label: "البتّ في المقترحات", description: "قبول مقترحات السلاسل أو رفضها." },
       { key: "series.visibility", label: "إظهار وإخفاء السلاسل", description: "مفتاح ظهور السلاسل المتقاعدة." },
@@ -111,7 +115,7 @@ export const SYSTEM_ROLES: SystemRole[] = [
     label: "رئيس التحرير",
     description: "كل الصلاحيات التحريرية والبتّ في السلاسل وإعدادات الذكاء وعرض الأعضاء.",
     defaults: PERMISSION_KEYS.filter(
-      (key) => !["users.manage", "users.suspend", "roles.manage"].includes(key),
+      (key) => !["users.manage", "users.suspend", "roles.manage", "jak.delete"].includes(key),
     ),
   },
   {
@@ -128,6 +132,8 @@ export const SYSTEM_ROLES: SystemRole[] = [
       "story.schedule",
       "story.archive",
       "jak.manage",
+      "jak.publish",
+      "jak.archive",
       "series.propose",
       "series.visibility",
       "media.upload",
