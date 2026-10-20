@@ -66,7 +66,6 @@ try {
   }`);
   await write('lib/jak-sharing.ts', `import {jakReportHref} from './jak-urls';
     export function jakReportMetadata(report: any) {return {alternates:{canonical:jakReportHref(report)}}}`);
-  await write('components/jak-reading-text.tsx', 'export const JakReadingText=(_props: {report: unknown})=>null');
   await write('components/jak-code-frame.tsx', 'export function JakCodeFrame({id}: {id:string;title:string}) {return <iframe title="report" src={"/api/jak-reports/"+id+"/document"}/>}');
   await write('app/layout.jsx', 'export default function Layout({children}) { return <html><body>{children}</body></html> }');
   await write('app/page.jsx', 'export default function Page() {return <main>ready</main>}');

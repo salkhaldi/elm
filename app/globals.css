@@ -192,11 +192,6 @@ img { max-width: 100%; display: block; }
   background: #080b12;
 }
 
-.jak-reading-text { margin: 0 auto; max-width: 56rem; padding: 1.25rem; background: #fff; color: #18232d; }
-.jak-reading-text summary { cursor: pointer; font-weight: 700; padding: .5rem 0; }
-.jak-reading-text article { padding: 1rem 0; line-height: 2; overflow-wrap: anywhere; }
-.jak-reading-text article h2 { font-size: 1.5rem; margin-bottom: 1rem; }
-.jak-reading-text article p { margin-block: .75rem; white-space: pre-line; }
 
 @media (max-width: 640px) {
   .jak-reader-nav { inset-block-start: 8px; inset-inline-start: 8px; }

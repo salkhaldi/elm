@@ -4,7 +4,6 @@ import { requireScreen } from "@/lib/tahrir/screen";
 import { assertCanWrite } from "@/lib/tahrir/write-policy";
 import { getJakReport } from "@/lib/tahrir/jak-reports";
 import { JakCodeFrame } from "@/components/jak-code-frame";
-import { JakReadingText } from "@/components/jak-reading-text";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "معاينة تقرير جاك العلم", robots: { index: false, follow: false } };
@@ -19,6 +18,5 @@ export default async function JakReportPreview({ params }: { params: Promise<{ i
     <h1 className="text-xl font-bold">{report.title}</h1>
     <p className="text-sm text-muted-foreground">معاينة خاصة للنسخة المحفوظة · {report.status === "published" ? "منشور" : "غير منشور"}</p>
     <JakCodeFrame id={report.id} title={report.title} />
-    <JakReadingText report={report} />
   </main>;
 }
