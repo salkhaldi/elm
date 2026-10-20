@@ -384,15 +384,6 @@ export function JakReportEditor({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader><CardTitle>نص التقرير للقراءة والبحث</CardTitle></CardHeader>
-            <CardContent className="grid gap-2">
-              <Label htmlFor="jak-report-reading">النص الكامل المطابق للتقرير</Label>
-              <Textarea id="jak-report-reading" rows={8} value={form.readingText} onChange={event => patch({ readingText: event.target.value })} placeholder="أضف نص التقرير هنا إذا كانت الكلمات داخل الصور أو تظهر بالحركة فقط." />
-              <p className="text-xs text-muted-foreground">يظهر للزائر ضمن «قراءة نص التقرير» ويسهّل وصول محركات البحث إليه. عند تركه فارغًا نستخرج النص الموجود في HTML؛ النص داخل الصور يحتاج إضافته هنا.</p>
-            </CardContent>
-          </Card>
-
           <Card className="overflow-hidden">
             <CardHeader className="flex-row justify-between border-b">
               <CardTitle>المعاينة الحالية</CardTitle>

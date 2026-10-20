@@ -14,7 +14,6 @@ test("Short numeric report links render and legacy UUID links redirect without l
         builder.onLoad({ filter: /.*/, namespace: "fixture" }, ({ path }) => ({ loader: "js", contents:
           path === "next/navigation" ? "export function notFound(){throw new Error('404')} export function permanentRedirect(path){throw new Error('308:'+path)}" :
           path.endsWith("jak-reports") ? "export async function getPublishedJakReportByPublicId(id){return ['11111111-1111-4111-8111-111111111111','1'].includes(id) ? {id:'11111111-1111-4111-8111-111111111111',publicNumber:1,slug:'الفيفا-لعبة-المال',title:'الفيفا',status:'published',excerpt:''} : null}" :
-          path.endsWith("jak-reading-text") ? "export const JakReadingText=()=>null" :
           path.endsWith("jak-code-frame") ? "export const JakCodeFrame=()=>null" :
           path.endsWith("jak-sharing") ? "export const jakReportMetadata=()=>({})" :
           path.endsWith("site-chrome") ? "export const SiteHeader=()=>null;export const SiteFooter=()=>null" : "export default ()=>null",
